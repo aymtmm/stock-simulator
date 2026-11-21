@@ -1,0 +1,12 @@
+[project]
+name = "yfinance-jp-test"
+version = "0.1.0"
+description = "A small test utility for checking Japanese stock intraday data via yfinance"
+requires-python = ">=3.10"
+dependencies = [
+    "yfinance>=0.2.50",
+    "pandas>=2.0",
+]
+
+[tool.setuptools]
+py-modules = ["fetch_yfinance"]

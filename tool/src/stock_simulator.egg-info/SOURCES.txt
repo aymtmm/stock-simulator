@@ -1,0 +1,14 @@
+README.md
+pyproject.toml
+src/stock_simulator/__init__.py
+src/stock_simulator/candles.py
+src/stock_simulator/cli.py
+src/stock_simulator/csv_import.py
+src/stock_simulator/db.py
+src/stock_simulator.egg-info/PKG-INFO
+src/stock_simulator.egg-info/SOURCES.txt
+src/stock_simulator.egg-info/dependency_links.txt
+src/stock_simulator.egg-info/entry_points.txt
+src/stock_simulator.egg-info/requires.txt
+src/stock_simulator.egg-info/top_level.txt
+tests/test_phase1.py
