@@ -28,6 +28,13 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
+To also save retrieved OHLCV bars into the SQLite database, install the core
+project into the same environment:
+
+```powershell
+pip install -e ..\tool
+```
+
 実行ポリシーで止まる場合は、同じPowerShellで一時的に次を実行してから再度Activateしてください。
 
 ```powershell
@@ -53,6 +60,33 @@ python fetch_yfinance.py --tickers 7203.T 6758.T
 python fetch_yfinance.py --interval 5m --period 5d
 ```
 
+SQLiteへの保存は明示的に有効にします。未指定の場合、従来どおりCSVだけを
+出力します。
+
+```powershell
+python fetch_yfinance.py --interval 1m --save-to-db
+python fetch_yfinance.py --tickers 7203.T 6758.T --interval 5m --save-to-db --db ..\tool\data\database\market.sqlite3
+```
+
+The default mapping file is [`symbol_mappings.csv`](./symbol_mappings.csv), with
+columns `source,source_symbol,symbol`. Add an explicit row before importing a new
+ticker, or pass another file with `--symbol-map`. A missing mapping aborts the
+entire database batch; it is never converted by stripping `.T` or by using the
+source ticker as an implicit internal symbol.
+
+保存対象は分足のみです。OHLCは`auto_adjust=False`の値として保存し、
+`Adj Close`は独立した`adjusted_close`列に保存します。タイムゾーンのない
+バー時刻は拒否し、時刻はUTCに正規化します。取得結果を銘柄・データ元・時間足・
+価格調整基準ごとに時刻順で確認し、次のバー開始時刻が現在バーの開始＋時間足
+以降の場合に、現在バーを確定として扱います。取得結果の最後のバーは、取得時刻に
+かかわらず未確定です。DB内の未確定バーも後続バーで確認できれば確定に更新します。
+
+yfinanceから確定フラグは得られないため、この状態は「後続バーにより予定区間の
+終了を確認済み」という意味です。取得元による後日の訂正が
+ないことまでは保証しません。より新しい取得結果の価格・出来高訂正は反映しますが、
+確定状態は未確定へ戻りません。古い取得結果は新しい値を上書きせず、取得されなかった
+バーも削除しません。
+
 ## 出力
 
 `output` フォルダにCSVを保存します。標準出力には以下を表示します。
@@ -63,6 +97,8 @@ python fetch_yfinance.py --interval 5m --period 5d
 - 最新Close / Volume
 - 実行時刻と最新バー時刻の差
 - 直近5行
+
+`--save-to-db`を指定した場合はSQLite処理対象バー数とDBパスも表示します。
 
 ## 確認してほしいこと
 

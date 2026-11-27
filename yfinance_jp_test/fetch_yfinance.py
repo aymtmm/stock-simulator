@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -47,6 +47,19 @@ def main() -> int:
     parser.add_argument("--period", default="1d", help="取得期間 (例: 1d, 5d)")
     parser.add_argument("--interval", default="1m", help="足種 (例: 1m, 2m, 5m)")
     parser.add_argument("--output-dir", default="output", help="CSV出力先")
+    parser.add_argument(
+        "--save-to-db",
+        action="store_true",
+        help="OHLCVバーをstock_simulatorのSQLiteにも保存します",
+    )
+    default_symbol_map = Path(__file__).resolve().with_name("symbol_mappings.csv")
+    parser.add_argument(
+        "--symbol-map",
+        default=str(default_symbol_map),
+        help="明示的なsource_symbolから内部symbolへの対応表CSV",
+    )
+    default_db = Path(__file__).resolve().parents[1] / "tool" / "data" / "database" / "market.sqlite3"
+    parser.add_argument("--db", default=str(default_db), help="SQLite database path")
     args = parser.parse_args()
 
     now = datetime.now(JST)
@@ -69,7 +82,8 @@ def main() -> int:
         if frame.empty:
             continue
 
-        frames.append(frame)
+        fetched_at_utc = datetime.now(timezone.utc)
+        frames.append((ticker, frame, fetched_at_utc))
         latest_time = frame.index[-1]
         latest_close = frame["Close"].iloc[-1]
         latest_volume = frame["Volume"].iloc[-1] if "Volume" in frame else None
@@ -96,12 +110,48 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
     output_file = output_dir / f"yfinance_jp_{now:%Y%m%d_%H%M%S}.csv"
 
-    combined = pd.concat(frames)
+    combined = pd.concat([frame for _, frame, _ in frames])
     combined.to_csv(output_file, encoding="utf-8-sig")
     print("\n" + "=" * 72)
     print(f"CSV保存先: {output_file.resolve()}")
     print("注意: 最新バー時刻との差は配信遅延そのものではありません。")
     print("1分足のバー時刻・形成中バー・市場休場などの影響を受けます。")
+
+    if args.save_to_db:
+        from stock_simulator.db import connect
+        from stock_simulator.market_bar_repository import MarketBarRepository
+        from stock_simulator.providers.yfinance import (
+            confirm_with_successors,
+            to_market_bars,
+        )
+        from stock_simulator.symbol_mapping import SymbolMapper
+
+        mapper = SymbolMapper.from_csv(args.symbol_map)
+        bars = []
+        for ticker, frame, fetched_at in frames:
+            bars.extend(
+                to_market_bars(
+                    frame, ticker, args.interval, fetched_at, mapper
+                )
+            )
+
+        conn = connect(args.db)
+        try:
+            repository = MarketBarRepository(conn)
+            repository.migrate_legacy_symbols(mapper)
+            pending = repository.get_incomplete(
+                [bar.symbol for bar in bars],
+                source="yfinance",
+                timeframe=args.interval,
+                price_basis="raw",
+            )
+            to_save = confirm_with_successors(bars, pending)
+            saved_count = repository.upsert_many(to_save)
+            print(f"SQLite処理対象バー数: {saved_count}")
+            print(f"Database: {Path(args.db).resolve()}")
+        finally:
+            conn.close()
+
     print("=" * 72)
     return 0
 

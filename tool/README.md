@@ -92,6 +92,19 @@ You can also run without installing the command:
 python -m stock_simulator.cli ingest .\sample_ticks.csv
 ```
 
+Import yfinance OHLCV bars into SQLite (from this directory, after installing the
+core package and the yfinance test requirements):
+
+```powershell
+pip install -e .
+pip install -r ..\yfinance_jp_test\requirements.txt
+python ..\yfinance_jp_test\fetch_yfinance.py --interval 1m --save-to-db
+```
+
+Use `--tickers` to select symbols, `--interval 5m` for five-minute bars, and
+`--db .\data\database\market.sqlite3` to select the database. CSV output is
+still written as before. Database persistence is opt-in via `--save-to-db`.
+
 ## Database
 
 Default path: `data/database/market.sqlite3`
@@ -100,8 +113,31 @@ Tables:
 
 - `observations`: normalized source observations, unique by timestamp + symbol + source
 - `candles`: derived OHLCV data, unique by symbol + interval + bucket + source
+- `market_bars`: provider OHLCV bars, including internal `symbol` and original `source_symbol`; unique by symbol + timeframe + UTC bar start + source + price basis
 
 Raw observations are retained. Candles can be rebuilt at any interval.
+`market_bars` keeps the source OHLCV separate from candles derived from observations.
+Its `adjusted_close` is stored separately; `open`, `high`, `low`, and `close` remain
+the unadjusted values returned with `auto_adjust=False`. New imports require an
+explicit mapping in `..\yfinance_jp_test\symbol_mappings.csv`; an unmapped source
+symbol aborts the database batch rather than being guessed. Only minute intervals
+are accepted. Bar timestamps must include a timezone and are stored in UTC.
+
+`is_complete` is based on observing a later bar for the same symbol, source,
+timeframe, and price basis whose start is at or after the current bar's nominal end.
+The last bar in a response is therefore incomplete, regardless of wall-clock time.
+Previously stored incomplete bars can be confirmed when a later bar is observed.
+This confirms that the nominal interval has passed; yfinance does not provide an
+authoritative finality signal, and it does not guarantee that the provider will
+never revise historical values. Newer fetches may correct OHLCV values, while
+completion never regresses. Older fetches cannot overwrite newer prices. Missing
+bars are not deleted.
+
+Opening a database created by the earlier Phase 1 integration adds
+`market_bars.source_symbol` and resets its prior time-based completion flags to
+incomplete. The next yfinance database import applies explicit mappings to known
+legacy symbols; unknown legacy rows are preserved with a NULL `source_symbol`.
+`observations` and `candles` are not migrated or modified.
 
 ## Tests
 
